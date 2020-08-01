@@ -1,26 +1,6 @@
 ---
 version: '3.4'
-
 services:
-  mongo:
-    image: mongo:4.2.5
-    hostname: mongo
-    container_name: mongo
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: mongo-user
-      MONGO_INITDB_ROOT_PASSWORD: mongo-pw
-      MONGO_REPLICA_SET_NAME: replica
-      MONGO_INITDB_DATABASE: admin
-    command: --replSet replica --bind_ip_all
-    healthcheck:
-            test: test $$(echo "rs.initiate().ok || rs.status().ok" | mongo -u mongo-user -p mongo-pw --quiet) -eq 1
-            interval: 10s
-            start_period: 30s
-    volumes:
-      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
-
   zookeeper:
     image: confluentinc/cp-zookeeper:5.5.0
     hostname: zookeeper
@@ -70,7 +50,7 @@ services:
       SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: 'zookeeper:2181'
 
   ksqldb-server:
-    image: confluentinc/ksqldb-server:0.10.1
+    image: confluentinc/ksqldb-server:0.9.0
     hostname: ksqldb-server
     container_name: ksqldb-server
     depends_on:
@@ -78,8 +58,6 @@ services:
       - schema-registry
     ports:
       - "8088:8088"
-    volumes:
-      - "./confluent-hub-components/:/usr/share/kafka/plugins/"
     environment:
       KSQL_LISTENERS: "http://0.0.0.0:8088"
       KSQL_BOOTSTRAP_SERVERS: "broker:29092"
@@ -100,27 +78,25 @@ services:
       KSQL_CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
       KSQL_CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
       KSQL_CONNECT_PLUGIN_PATH: "/usr/share/kafka/plugins"
-      KSQL_KSQL_CONNECT_URL: "http://connect:8083"
+      KSQL_KSQL_CONNECT_URL: "http://kafka-connect-onprem:18083"
 
   ksqldb-cli:
-    image: confluentinc/ksqldb-cli:0.10.1
+    image: confluentinc/ksqldb-cli:0.9.0
     container_name: ksqldb-cli
     depends_on:
       - broker
       - ksqldb-server
-      - connect
+      - kafka-connect-onprem
     entrypoint: /bin/sh
     tty: true
 
   dbtrans-simulator:
     container_name: dbtrans-simulator
     depends_on:
-      - mongo
+      - mysql
     command: tail -f /dev/null
     build:
       context: ./db_transaction_simulator
-    links:
-      - mongo
 
   control-center:
     image: confluentinc/cp-enterprise-control-center:5.5.0
@@ -131,13 +107,13 @@ services:
       - broker
       - schema-registry
       - ksqldb-server
-      - connect
+      - kafka-connect-onprem
     ports:
       - "9021:9021"
     environment:
       CONTROL_CENTER_BOOTSTRAP_SERVERS: 'broker:29092'
       CONTROL_CENTER_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      CONTROL_CENTER_CONNECT_CLUSTER: 'connect:8083'
+      CONTROL_CENTER_CONNECT_CLUSTER: 'kafka-connect-onprem:18083'
       CONTROL_CENTER_KSQL_KSQLDB_URL: "http://ksqldb-server:8088"
       CONTROL_CENTER_KSQL_KSQLDB_ADVERTISED_URL: "http://localhost:8088"
       CONTROL_CENTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
@@ -145,23 +121,22 @@ services:
       CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
       CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
       CONFLUENT_METRICS_TOPIC_REPLICATION: 1
-
       PORT: 9021
-  connect:
+
+  kafka-connect-onprem:
     image: confluentinc/cp-kafka-connect:5.5.0
-    container_name: connect
-    hostname: connect
+    container_name: kafka-connect-onprem
+    hostname: kafka-connect-onprem
     depends_on:
       - zookeeper
       - broker
       - schema-registry
     ports:
-      - 8083:8083
+      - 18083:18083
     environment:
       CONNECT_BOOTSTRAP_SERVERS: "broker:29092"
-      CONNECT_REST_ADVERTISED_HOST_NAME: connect
-      CONNECT_REST_PORT: 8083
-      CONNECT_GROUP_ID: connect
+      CONNECT_REST_PORT: 18083
+      CONNECT_GROUP_ID: kafka-connect-onprem
       CONNECT_CONFIG_STORAGE_TOPIC: _connect-configs
       CONNECT_OFFSET_STORAGE_TOPIC: _connect-offsets
       CONNECT_STATUS_STORAGE_TOPIC: _connect-statuses
@@ -171,7 +146,7 @@ services:
       CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
       CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
       CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
-      CONNECT_REST_ADVERTISED_HOST_NAME: "connect"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect-onprem"
       CONNECT_LOG4J_ROOT_LOGLEVEL: "INFO"
       CONNECT_LOG4J_LOGGERS: "org.apache.kafka.connect.runtime.rest=WARN,org.reflections=ERROR"
       CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: "1"
@@ -184,8 +159,6 @@ services:
       CONNECT_CONFIG_PROVIDERS: "file"
       CONNECT_CONFIG_PROVIDERS_FILE_CLASS: "org.apache.kafka.common.config.provider.FileConfigProvider"
       CONNECT_REST_EXTENSION_CLASSES: io.confluent.connect.replicator.monitoring.ReplicatorMonitoringExtension
-    volumes:
-      - "./confluent-hub-components/:/usr/share/confluent-hub-components/"
     command:
       - bash
       - -c
@@ -193,11 +166,45 @@ services:
         apt-get -qq update
         apt-get install -y confluent-kafka-connect-replicator=5.5.0-1
         apt-get clean && rm -rf /tmp/* /var/lib/apt/lists/*
+        confluent-hub install --no-prompt debezium/debezium-connector-mysql:0.10.0
+        confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:latest
+        cd /usr/share/confluent-hub-components/confluentinc-kafka-connect-jdbc/lib
+        curl -k -SL "http://dev.mysql.com/get/Downloads/Connector-J/mysql-connector-java-5.1.37.tar.gz" | tar -xzf -
         #
         echo "Launching Kafka Connect worker"
         /etc/confluent/docker/run &
         #
         sleep infinity
+
+  mysql:
+    # *-----------------------------*
+    # To connect to the DB:
+    #   docker-compose exec mysql bash -c 'mysql -u root -p$MYSQL_ROOT_PASSWORD'
+    # *-----------------------------*
+    image: debezium/example-mysql:0.9
+    container_name: mysql
+    ports:
+      - 3306:3306
+    environment:
+      - MYSQL_ROOT_PASSWORD=debezium
+      - MYSQL_USER=mysqluser
+      - MYSQL_PASSWORD=mysqlpw
+    volumes:
+      - ./mysql_schema.sql:/docker-entrypoint-initdb.d/mysql_schema.sql
+    healthcheck:
+      test: '/usr/bin/mysql --user=root --password=debezium --execute "SHOW DATABASES;"'
+      interval: 5s
+      timeout: 20s
+      retries: 30
+
+  workshop-docs:
+    container_name: workshop-docs-webserver
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - ./asciidoc:/usr/share/nginx/html
+
   rest-proxy:
     image: confluentinc/cp-kafka-rest:5.5.0
     depends_on:

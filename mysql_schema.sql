@@ -209,8 +209,8 @@ insert into purchase_order_details(id, purchase_order_id, product_id, quantity, 
 insert into purchase_order_details(id, purchase_order_id, product_id, quantity, cost) values (29, 1, 29, 100, 1.75);
 insert into purchase_order_details(id, purchase_order_id, product_id, quantity, cost) values (30, 1, 30, 100, 1.72);
 
-DROP TABLE IF EXISTS dcxx_out_of_stock_events;
-CREATE TABLE dcxx_out_of_stock_events (
+DROP TABLE IF EXISTS out_of_stock_events;
+CREATE TABLE out_of_stock_events (
   product_id            INT,
   window_start_time     VARCHAR(50),
   window_end_time       VARCHAR(50),

@@ -42,7 +42,7 @@ while True:
   o += 1
 
   #
-  # Insert into sales_orders 
+  # Insert into sales_orders
   #
 
   # select a random customer
@@ -76,20 +76,20 @@ while True:
     sql = "insert into sales_order_details(id, sales_order_id, product_id, quantity, price) values (%s, %s, %s, %s, %s)"
     val = (sales_order_details_id + od, sales_order_id + o, product_id, quantity, price)
     cursor.execute(sql, val)
- 
+
   #
   # Raise some purchase orders to meet demand
   #
-  sql = "select count(distinct product_id) from dcxx_out_of_stock_events"
+  sql = "select count(distinct product_id) from out_of_stock_events"
   cursor.execute(sql)
   out_of_stock_product_count = cursor.fetchone()[0]
 
   if out_of_stock_product_count > 0:
 
     p += 1
-    
+
     #
-    # Insert into purchase_orders 
+    # Insert into purchase_orders
     #
 
     # select a random supplier
@@ -97,13 +97,13 @@ while True:
     sql = "INSERT INTO purchase_orders (id, order_date, supplier_id) VALUES (%s, %s, %s)"
     val = (purchase_order_id + p, now, int(random.triangular(1, 31, most_frequent_supplier)) )
     cursor.execute(sql, val)
-    
+
     print "Purchase Order " + str(purchase_order_id + p) + " Created"
 
     #
     # insert into purchase_order_details
     #
-    sql = "select product_id,cost, max(quantity_to_purchase) from dcxx_out_of_stock_events oos, products p where p.id = oos.product_id group by product_id"
+    sql = "select product_id,cost, max(quantity_to_purchase) from out_of_stock_events oos, products p where p.id = oos.product_id group by product_id"
     cursor.execute(sql)
     out_of_stock_products = cursor.fetchall()
 
@@ -123,13 +123,13 @@ while True:
         sql = "insert into purchase_order_details(id, purchase_order_id, product_id, quantity, cost) values (%s, %s, %s, %s, %s)"
         val = (purchase_order_details_id + pd, purchase_order_id + p, product_id, quantity, cost)
         cursor.execute(sql, val)
- 
+
     # Delete processed out of stock events
-    sql = "DELETE FROM dcxx_out_of_stock_events"
+    sql = "DELETE FROM out_of_stock_events"
     cursor.execute(sql)
 
   db.commit()
-  
+
   time.sleep(tick_seconds)
 
 db.close()
