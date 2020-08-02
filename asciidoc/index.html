@@ -828,7 +828,6 @@ ol > li p, ul > li p, ul dd, ol dd, .olist .olist, .ulist .olist, .olist .ulist 
 <li><a href="#_lab_9_pull_queries">Lab 9: Pull Queries</a></li>
 <li><a href="#_lab_10_streaming_recent_product_demand">Lab 10: Streaming Recent Product Demand</a></li>
 <li><a href="#_lab_11_streaming_out_of_stock_events">Lab 11: Streaming <em>"Out of Stock"</em> Events</a></li>
-<li><a href="#_lab_12_sink_events_into_mysql">Lab 12: Sink Events into MySQL</a></li>
 <li><a href="#_wrapping_up">Wrapping up</a></li>
 </ul>
 </div>
@@ -2670,7 +2669,47 @@ Query terminated</code></pre>
 <div class="paragraph">
 <p>Now that we have the <code>current_stock</code> table and <code>product_demand_last_3mins</code> stream, we can create a <code>out_of_stock_events</code> stream by joining the two together and calculating the required purchase order quantity. We calculate the <code>purchase_qty</code> from adding the inverse of the current stock level to the last 3 minutes of demand. The stream is filtered to only include products that have negative stock and therefore need purchase orders raising for them.</p>
 </div>
+<div class="paragraph">
+<p>But before we do that, let&#8217;s open a couple more terminal sessions and start the ksqlDB CLI in each.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code>ssh @</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code>docker exec -it ksqldb-cli ksql http://ksqldb-server:8088</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Execute the following query in the 2nd session&#8230;&#8203;</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code>SET 'auto.offset.reset'='latest';
+SELECT  product_id,
+        stock_level
+FROM  current_stock
+EMIT CHANGES;</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>&#8230;&#8203;and this query in the 3rd session</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code>SET 'auto.offset.reset'='latest';
+SELECT  product_id,
+        product_qty
+FROM  purchases_enriched
+EMIT CHANGES;</code></pre>
+</div>
+</div>
 <div class="admonitionblock important">
+	<div class="paragraph">
+		<p>Now create the stream...</p>
+	</div>
 <table>
 <tr>
 <td class="icon">
@@ -2751,98 +2790,17 @@ Query terminated</code></pre>
 ...</code></pre>
 </div>
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_lab_12_sink_events_into_mysql">Lab 12: Sink Events into MySQL</h2>
-<div class="sectionbody">
 <div class="paragraph">
-<p>Finally we need to sink the <code>out_of_stock_events</code> topic into a MySQL database table, the on-premise application will then process these events and create purchase order for us.</p>
+<p>Since we have a sink connector in place, the <code>out_of_stock_events</code> topic goes directly into a MySQL database table, the on-premise application will then process these events and create purchase order for us.</p>
 </div>
 <div class="imageblock">
 <div class="content">
 <img src="./images/6_jdbc_sink.png" alt="6 jdbc sink">
 </div>
+<p>You now have a real time view of the current product stock levels in the second ksqlDB session and the purchases being made to replenish the stock in third session.</p>
 </div>
 <div class="paragraph">
-<p>But before we do that, let&#8217;s open a couple more terminal sessions and start the ksqlDB CLI in each.</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlight"><code>ssh @</code></pre>
-</div>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlight"><code>docker exec -it ksqldb-cli ksql http://ksqldb-server:8088</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p>Execute the following query in the 1st session&#8230;&#8203;</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlight"><code>SET 'auto.offset.reset'='latest';
-SELECT  product_id,
-        stock_level
-FROM  current_stock
-EMIT CHANGES;</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p>&#8230;&#8203;and this query in the 2nd session</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlight"><code>SET 'auto.offset.reset'='latest';
-SELECT  product_id,
-        product_qty
-FROM  purchases_enriched
-EMIT CHANGES;</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p>You now have a real time view of the current product stock levels in the first ksqlDB session and the purchases being made to replenish the stock in second. Not that the second query isn&#8217;t returning anything yet.</p>
-</div>
-<div class="paragraph">
-<p>Let&#8217;s now sink the <em>out of stock events</em> to the MySQL database using the JDBC Connector. Once the events start arriving in the database, the orders application will process them and start generating the required purchase orders.</p>
-</div>
-<div class="paragraph">
-<p>In a third terminal session, create the JDBC Sink Connector by running the following from the command line.</p>
-</div>
-<div class="admonitionblock important">
-<table>
-<tr>
-<td class="icon">
-<i class="fa icon-important" title="Important"></i>
-</td>
-<td class="content">
-<div class="listingblock">
-<div class="content">
-<pre class="highlight"><code>curl -i -X POST -H "Accept:application/json" \
-    -H  "Content-Type:application/json" http://localhost:18083/connectors/ \
-    -d '{
-        "name": "jdbc-mysql-sink",
-        "config": {
-          "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
-          "topics": "out_of_stock_events",
-          "connection.url": "jdbc:mysql://mysql:3306/orders",
-          "connection.user": "mysqluser",
-          "connection.password": "mysqlpw",
-          "insert.mode": "INSERT",
-          "batch.size": "3000",
-          "auto.create": "true",
-          "key.converter": "org.apache.kafka.connect.storage.StringConverter"
-       }
-    }'</code></pre>
-</div>
-</div>
-</td>
-</tr>
-</table>
-</div>
-<div class="paragraph">
-<p>Observe the current stock query in the first ksqlDB session, when a product has zero or less stock you should see a purchase event appear in the second ksqlDB session and then the new stock level reflected in the first session. In theory, given a constant demand, each product should run out of stock and get replenished roughly every 3 minutes.</p>
+	<p>Observe the current stock query in the second ksqlDB session, when a product has zero or less stock you should see a purchase event appear in the third ksqlDB session and then the new stock level reflected in the second session. In theory, given a constant demand, each product should run out of stock and get replenished roughly every 3 minutes.</p>
 </div>
 <div class="admonitionblock tip">
 <table>

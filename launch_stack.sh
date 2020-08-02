@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
 
-docker-compose pull
+sudo docker-compose up -d --force-recreate
 
-sudo pkill mysql
-sudo pkill mysqld
-
-docker-compose up -d --force-recreate
-
-until [ $(docker inspect --format='{{json .State.Health}}' kafka-connect-onprem | jq .Status) = "\"healthy\"" ]
+until [ $(sudo docker inspect --format='{{json .State.Health}}' kafka-connect-onprem | jq .Status) = "\"healthy\"" ]
 do
 
-  status=$(docker inspect --format='{{json .State.Health}}' kafka-connect-onprem | jq .Status)
+  status=$(sudo docker inspect --format='{{json .State.Health}}' kafka-connect-onprem | jq .Status)
   python3 -c "print('Waiting for Kafka Connect to be ready...[' + '$status'[1:-1].upper() + ']')"
   sleep 10
 
